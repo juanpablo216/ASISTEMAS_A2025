@@ -3,13 +3,20 @@ import pandas as pd
 
 st.set_page_config(page_title="CAAT - Herramienta de Auditoría", layout="wide")
 
-st.title("🧪 Herramienta CAAT - Pruebas de Auditoría Automatizadas")
-st.markdown("Sube un archivo en formato **CSV**, **Excel (.xlsx/.xls)** o **.txt tabulado** y selecciona la prueba que deseas ejecutar.")
+st.title("🧪 Herramienta CAAT - Auditoría Automatizada con Múltiples Pruebas")
 
-# Cargar archivo
-archivo = st.file_uploader("📁 Cargar archivo de datos", type=["csv", "xlsx", "xls", "txt"])
+st.markdown("""
+Esta herramienta permite ejecutar diferentes pruebas de auditoría sobre archivos de datos cargados individualmente.
+- 📁 Carga un archivo por cada prueba.
+- 🧪 Las pruebas están separadas para mayor flexibilidad.
+""")
 
-# Funciones
+# -----------------------------
+# 🔍 PRUEBA 1: FACTURAS DUPLICADAS
+# -----------------------------
+st.header("1️⃣ Detección de Facturas Duplicadas")
+archivo_duplicados = st.file_uploader("📁 Subir archivo para detectar facturas duplicadas", type=["csv", "xlsx", "xls", "txt"], key="duplicados")
+
 def detectar_duplicados(df):
     combinaciones = [
         ['Número', 'R.U.C.', 'Total', 'Fecha'],
@@ -22,7 +29,41 @@ def detectar_duplicados(df):
             return duplicados, campos
     return None, []
 
-def detectar_montos_inusuales(df, columna, metodo, umbral_fijo=10000.0, k=2):
+if archivo_duplicados:
+    try:
+        nombre = archivo_duplicados.name.lower()
+        if nombre.endswith(".csv"):
+            df = pd.read_csv(archivo_duplicados)
+        elif nombre.endswith((".xlsx", ".xls")):
+            df = pd.read_excel(archivo_duplicados)
+        elif nombre.endswith(".txt"):
+            df = pd.read_csv(archivo_duplicados, sep="\t")
+        else:
+            st.error("❌ Formato no compatible.")
+            st.stop()
+
+        st.success("✅ Archivo cargado. Total registros: {}".format(len(df)))
+        st.dataframe(df.head())
+
+        duplicados, campos = detectar_duplicados(df)
+        if duplicados is not None and not duplicados.empty:
+            st.warning(f"⚠️ Se encontraron {len(duplicados)} duplicados usando: {', '.join(campos)}")
+            st.dataframe(duplicados)
+            csv = duplicados.to_csv(index=False).encode('utf-8')
+            st.download_button("⬇️ Descargar duplicados", csv, "duplicados.csv", "text/csv")
+        else:
+            st.success("✅ No se encontraron duplicados.")
+    except Exception as e:
+        st.error(f"❌ Error al procesar el archivo: {e}")
+
+
+# -----------------------------
+# 📈 PRUEBA 2: MONTOS INUSUALES
+# -----------------------------
+st.header("2️⃣ Detección de Montos Inusuales")
+archivo_montos = st.file_uploader("📁 Subir archivo para detectar montos inusuales", type=["csv", "xlsx", "xls", "txt"], key="montos")
+
+def detectar_montos(df, columna, metodo, umbral_fijo=10000, k=2):
     if columna not in df.columns:
         return pd.DataFrame(), None
 
@@ -39,76 +80,45 @@ def detectar_montos_inusuales(df, columna, metodo, umbral_fijo=10000.0, k=2):
 
     return pd.DataFrame(), None
 
-# Procesamiento
-if archivo:
+if archivo_montos:
     try:
-        nombre = archivo.name.lower()
+        nombre = archivo_montos.name.lower()
         if nombre.endswith(".csv"):
-            df = pd.read_csv(archivo)
+            df_montos = pd.read_csv(archivo_montos)
         elif nombre.endswith((".xlsx", ".xls")):
-            df = pd.read_excel(archivo)
+            df_montos = pd.read_excel(archivo_montos)
         elif nombre.endswith(".txt"):
-            df = pd.read_csv(archivo, sep="\t", encoding="utf-8")
+            df_montos = pd.read_csv(archivo_montos, sep="\t")
         else:
-            st.error("❌ Formato de archivo no soportado.")
+            st.error("❌ Formato no compatible.")
             st.stop()
 
-        st.success("✅ Archivo cargado correctamente.")
-        st.info(f"📊 Total de registros: {len(df)}")
-        st.dataframe(df.head())
+        st.success("✅ Archivo cargado. Total registros: {}".format(len(df_montos)))
+        st.dataframe(df_montos.head())
 
-        # Selección de prueba
-        prueba = st.selectbox("🧩 Selecciona la prueba a ejecutar:", [
-            "Detección de Facturas Duplicadas",
-            "Detección de Montos Inusuales"
-        ])
-
-        # 🧪 Prueba 1: Facturas duplicadas
-        if prueba == "Detección de Facturas Duplicadas":
-            duplicados, campos = detectar_duplicados(df)
-            if duplicados is not None and not duplicados.empty:
-                st.warning(f"⚠️ Se encontraron {len(duplicados)} duplicados usando: {', '.join(campos)}")
-                st.dataframe(duplicados)
-                csv = duplicados.to_csv(index=False).encode('utf-8')
-                st.download_button("⬇️ Descargar duplicados", csv, "duplicados.csv", "text/csv")
-            else:
-                st.success("✅ No se encontraron facturas duplicadas.")
-
-        # 🧪 Prueba 2: Montos inusuales
-        elif prueba == "Detección de Montos Inusuales":
-            columnas_numericas = df.select_dtypes(include='number').columns.tolist()
-            if not columnas_numericas:
-                st.error("❌ No se encontraron columnas numéricas.")
-                st.stop()
-
+        columnas_numericas = df_montos.select_dtypes(include='number').columns.tolist()
+        if columnas_numericas:
             columna = st.selectbox("📌 Selecciona columna de monto:", columnas_numericas)
-            metodo = st.radio("Método de detección:", ["Umbral fijo", "Umbral estadístico"])
-
+            metodo = st.radio("Método para definir monto inusual:", ["Umbral fijo", "Umbral estadístico"])
+            
             if metodo == "Umbral fijo":
                 umbral = st.number_input("💰 Umbral fijo ($):", min_value=0.0, value=10000.0)
-                if st.button("🔍 Ejecutar prueba"):
-                    resultado, umbral_usado = detectar_montos_inusuales(df, columna, metodo, umbral)
-                    if not resultado.empty:
-                        st.warning(f"⚠️ Se encontraron {len(resultado)} registros > ${umbral_usado:,.2f}")
-                        st.dataframe(resultado)
-                        csv = resultado.to_csv(index=False).encode('utf-8')
-                        st.download_button("⬇️ Descargar resultados", csv, "montos_inusuales.csv", "text/csv")
-                    else:
-                        st.success("✅ No se encontraron montos inusuales.")
-
-            elif metodo == "Umbral estadístico":
+                if st.button("🔍 Ejecutar prueba (fijo)"):
+                    resultado, umbral_usado = detectar_montos(df_montos, columna, metodo, umbral_fijo=umbral)
+            else:
                 k = st.slider("🔬 Coeficiente (σ)", min_value=1, max_value=5, value=2)
-                if st.button("🔍 Ejecutar prueba"):
-                    resultado, limite = detectar_montos_inusuales(df, columna, metodo, k=k)
-                    if not resultado.empty:
-                        st.warning(f"⚠️ {len(resultado)} registros superan el umbral dinámico: ${limite:,.2f}")
-                        st.dataframe(resultado)
-                        csv = resultado.to_csv(index=False).encode('utf-8')
-                        st.download_button("⬇️ Descargar resultados", csv, "montos_inusuales.csv", "text/csv")
-                    else:
-                        st.success("✅ No se encontraron montos inusuales.")
+                if st.button("🔍 Ejecutar prueba (estadístico)"):
+                    resultado, umbral_usado = detectar_montos(df_montos, columna, metodo, k=k)
 
+            if 'resultado' in locals() and not resultado.empty:
+                st.warning(f"⚠️ Se encontraron {len(resultado)} registros con montos inusuales. Umbral: {umbral_usado:,.2f}")
+                st.dataframe(resultado)
+                csv = resultado.to_csv(index=False).encode('utf-8')
+                st.download_button("⬇️ Descargar resultados", csv, "montos_inusuales.csv", "text/csv")
+            elif 'resultado' in locals():
+                st.success("✅ No se encontraron montos inusuales.")
+
+        else:
+            st.error("❌ No se encontraron columnas numéricas.")
     except Exception as e:
         st.error(f"❌ Error al procesar el archivo: {e}")
-else:
-    st.info("👈 Esperando que subas un archivo...")
