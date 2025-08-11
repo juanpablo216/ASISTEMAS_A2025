@@ -12,6 +12,45 @@ st.set_page_config(page_title="CAAT – Auditoría Automatizada", layout="wide")
 st.title("🧪 Herramienta CAAT – Auditoría Automatizada")
 st.markdown("Sube archivos y ejecuta las pruebas en cada sección. Soporta **CSV/XLSX/XLS/TXT**.")
 
+# ===== UI sugar: estilos, helper y sidebar =====
+st.markdown("""
+<style>
+.main .block-container {max-width: 1200px; padding-top: 1rem; padding-bottom: 2rem;}
+h1, h2, h3 { letter-spacing: .2px; }
+.section-card {
+  border: 1px solid rgba(125,125,125,.2);
+  border-radius: 14px; padding: 14px 18px; margin: 12px 0 22px 0;
+  background: rgba(200,200,255,.06);
+}
+.badge {
+  display: inline-block; padding: 4px 10px; border-radius: 999px;
+  background: #eef2ff; color: #2f3ab2; font-size: 12px; font-weight: 600; margin-left: 6px;
+  border: 1px solid rgba(47,58,178,.15);
+}
+.small { color:#6b7280; font-size: 13px; }
+hr { border: none; border-top: 1px solid rgba(125,125,125,.2); margin: 12px 0 18px;}
+[data-testid="stFileUploader"] {border-radius: 12px; border: 1px dashed rgba(125,125,125,.35); padding: 14px;}
+.stButton>button { border-radius: 999px !important; padding: .55rem 1rem; font-weight: 600; }
+</style>
+""", unsafe_allow_html=True)
+
+def section_intro(n, title, desc):
+    st.markdown(f"""
+<div class="section-card">
+  <h2>{n} {title} <span class="badge">CSV/XLSX/XLS/TXT</span></h2>
+  <div class="small">{desc}</div>
+</div>
+""", unsafe_allow_html=True)
+
+with st.sidebar:
+    st.markdown("### 🧭 Navegación")
+    st.write("1) Duplicados\n\n2) Montos inusuales\n\n3) Conciliación\n\n4) Benford\n\n5) Concentración")
+    st.markdown("---")
+    st.markdown("### 💡 Consejos")
+    st.caption("- Para Benford, elige una columna **numérica** de montos.\n- En Conciliación, usa una **clave** común (ID/Numero/Referencia).\n- Si tu CSV usa **;** o **|**, la app lo detecta automáticamente.")
+    st.markdown("---")
+    st.caption("Versión CAAT A-2025 • Streamlit")
+
 # ==============================
 # Utilidades comunes y robustas
 # ==============================
@@ -78,7 +117,6 @@ def col_auto(df, candidatos):
     for alias in candidatos:
         if alias in cols_norm:
             return cols_norm[alias]
-    # coincidencias parciales
     for c in df.columns:
         cl = c.lower()
         if any(alias in cl for alias in candidatos):
@@ -86,7 +124,7 @@ def col_auto(df, candidatos):
     return None
 
 def coerce_amount(series):
-    # Convierte '1.234,56' -> 1234.56 y también '1,234.56' -> 1234.56
+    # '1.234,56' -> 1234.56 y '1,234.56' -> 1234.56
     s = series.astype(str)
     s = s.str.replace(r"\.", "", regex=True)  # remover miles con punto
     s = s.str.replace(",", ".", regex=False)  # coma -> punto
@@ -99,13 +137,14 @@ def to_csv_bytes(df):
     return df.to_csv(index=False).encode("utf-8")
 
 # ======================================================
-# 1) CAAT – Detección de Facturas Duplicadas (multi-formato)
+# 1) CAAT – Detección de Facturas Duplicadas
 # ======================================================
-st.header("1️⃣ Detección de Facturas Duplicadas")
+section_intro("1️⃣", "Detección de Facturas Duplicadas",
+              "Identifica facturas repetidas comparando número, RUC, fecha y total para prevenir pagos duplicados o errores.")
+
 file_dup = st.file_uploader("📁 Subir archivo para duplicados (CSV/XLSX/XLS/TXT)", type=["csv","xlsx","xls","txt"], key="dup")
 
 def detectar_duplicados(df):
-    # combinaciones típicas en distintos orígenes
     combinaciones = [
         ['Número', 'R.U.C.', 'Total', 'Fecha'],
         ['SERIE_COMPROBANTE', 'RUC_EMISOR', 'IMPORTE_TOTAL', 'FECHA_EMISION'],
@@ -137,7 +176,9 @@ if file_dup:
 # ======================================================
 # 2) CAAT – Detección de Montos Inusuales (fijo o estadístico)
 # ======================================================
-st.header("2️⃣ Detección de Montos Inusuales")
+section_intro("2️⃣", "Detección de Montos Inusuales",
+              "Encuentra transacciones que superan un umbral (fijo o estadístico) para resaltar operaciones atípicas o de riesgo.")
+
 file_unusual = st.file_uploader("📁 Subir archivo para montos inusuales (CSV/XLSX/XLS/TXT)", type=["csv","xlsx","xls","txt"], key="unusual")
 
 if file_unusual:
@@ -148,7 +189,6 @@ if file_unusual:
         with st.expander("Ver primeras filas"):
             st.dataframe(dfm.head())
 
-        # Sugerir columna de monto
         sugerida_monto = col_auto(dfm, SINONIMOS_MONTO) or (dfm.select_dtypes(include="number").columns.tolist()[:1] or [None])[0]
         col_monto = st.selectbox("💰 Columna de monto", dfm.columns.tolist(),
                                  index=(dfm.columns.tolist().index(sugerida_monto) if sugerida_monto in dfm.columns else 0))
@@ -192,7 +232,8 @@ if file_unusual:
 # ======================================================
 # 3) CAAT – Conciliación de Reportes (A vs B, robusto)
 # ======================================================
-st.header("3️⃣ Conciliación de Reportes (A vs. B)")
+section_intro("3️⃣", "Conciliación de Reportes (A vs. B)",
+              "Compara dos archivos (p. ej., facturación y contabilidad) y reporta: Solo en A, Solo en B y diferencias de monto/fecha.")
 
 colA, colB = st.columns(2)
 with colA:
@@ -202,26 +243,20 @@ with colB:
 
 if file_A and file_B:
     try:
-        A = load_any(file_A, widget_key="sheet_A")
-        B = load_any(file_B, widget_key="sheet_B")
-        A = normalize_headers(A)
-        B = normalize_headers(B)
+        A = load_any(file_A, widget_key="sheet_A"); A = normalize_headers(A)
+        B = load_any(file_B, widget_key="sheet_B"); B = normalize_headers(B)
 
         st.success(f"✅ Cargados A={len(A)} filas, B={len(B)} filas")
         with st.expander("Ver primeras filas"):
             st.write("A (preview)"); st.dataframe(A.head())
             st.write("B (preview)"); st.dataframe(B.head())
 
-        # Auto-sugerencias
         clave_sug = None
-        id_A = col_auto(A, SINONIMOS_ID)
-        id_B = col_auto(B, SINONIMOS_ID)
-        if id_A and id_B and id_A in B.columns:
-            clave_sug = id_A
+        id_A = col_auto(A, SINONIMOS_ID); id_B = col_auto(B, SINONIMOS_ID)
+        if id_A and id_B and id_A in B.columns: clave_sug = id_A
         else:
             inter_cols = [c for c in A.columns if c in set(B.columns)]
-            if inter_cols:
-                clave_sug = inter_cols[0]
+            if inter_cols: clave_sug = inter_cols[0]
 
         montoA_sug = col_auto(A, SINONIMOS_MONTO) or (A.select_dtypes(include="number").columns.tolist()[:1] or [None])[0]
         montoB_sug = col_auto(B, SINONIMOS_MONTO) or (B.select_dtypes(include="number").columns.tolist()[:1] or [None])[0]
@@ -234,94 +269,63 @@ if file_A and file_B:
             st.error("❌ No hay columnas en común entre A y B.")
             st.stop()
 
-        clave = st.selectbox("🔑 Columna clave común", comunes,
-                             index=(comunes.index(clave_sug) if (clave_sug in comunes) else 0))
-        monto_A = st.selectbox("💰 Columna de monto en A", A.columns.tolist(),
-                               index=(A.columns.tolist().index(montoA_sug) if (montoA_sug in A.columns) else 0))
-        monto_B = st.selectbox("💰 Columna de monto en B", B.columns.tolist(),
-                               index=(B.columns.tolist().index(montoB_sug) if (montoB_sug in B.columns) else 0))
-        fecha_A_opt = st.selectbox("📅 Columna de fecha en A (opcional)", ["(ninguna)"] + A.columns.tolist(),
-                                   index=(["(ninguna)"] + A.columns.tolist()).index(fechaA_sug) if (fechaA_sug in (A.columns if A is not None else [])) else 0)
-        fecha_B_opt = st.selectbox("📅 Columna de fecha en B (opcional)", ["(ninguna)"] + B.columns.tolist(),
-                                   index=(["(ninguna)"] + B.columns.tolist()).index(fechaB_sug) if (fechaB_sug in (B.columns if B is not None else [])) else 0)
-
+        clave = st.selectbox("🔑 Columna clave común", comunes, index=(comunes.index(clave_sug) if (clave_sug in comunes) else 0))
+        monto_A = st.selectbox("💰 Columna de monto en A", A.columns.tolist(), index=(A.columns.tolist().index(montoA_sug) if (montoA_sug in A.columns) else 0))
+        monto_B = st.selectbox("💰 Columna de monto en B", B.columns.tolist(), index=(B.columns.tolist().index(montoB_sug) if (montoB_sug in B.columns) else 0))
+        fecha_A_opt = st.selectbox("📅 Columna de fecha en A (opcional)", ["(ninguna)"] + A.columns.tolist(), index=(["(ninguna)"] + A.columns.tolist()).index(fechaA_sug) if (fechaA_sug in (A.columns if A is not None else [])) else 0)
+        fecha_B_opt = st.selectbox("📅 Columna de fecha en B (opcional)", ["(ninguna)"] + B.columns.tolist(), index=(["(ninguna)"] + B.columns.tolist()).index(fechaB_sug) if (fechaB_sug in (B.columns if B is not None else [])) else 0)
         tolerancia = st.number_input("🎯 Tolerancia para diferencias de monto (valor absoluto)", min_value=0.0, value=0.0)
 
         if st.button("🔍 Ejecutar conciliación"):
-            # Normalización clave:
             A["_CLAVE_"] = A[clave].astype(str).str.strip().str.upper()
             B["_CLAVE_"] = B[clave].astype(str).str.strip().str.upper()
-
-            # Normalización montos:
             A["_MONTO_"] = coerce_amount(A[monto_A]) if A[monto_A].dtype == object else pd.to_numeric(A[monto_A], errors="coerce")
             B["_MONTO_"] = coerce_amount(B[monto_B]) if B[monto_B].dtype == object else pd.to_numeric(B[monto_B], errors="coerce")
-
-            # Fechas opcionales:
-            if fecha_A_opt != "(ninguna)":
-                A["_FECHA_"] = coerce_date(A[fecha_A_opt])
-            if fecha_B_opt != "(ninguna)":
-                B["_FECHA_"] = coerce_date(B[fecha_B_opt])
+            if fecha_A_opt != "(ninguna)": A["_FECHA_"] = coerce_date(A[fecha_A_opt])
+            if fecha_B_opt != "(ninguna)": B["_FECHA_"] = coerce_date(B[fecha_B_opt])
 
             merged = A.merge(B, on="_CLAVE_", how="outer", suffixes=("_A","_B"), indicator=True)
-
             solo_A = merged[merged["_merge"]=="left_only"].copy()
             solo_B = merged[merged["_merge"]=="right_only"].copy()
             coinc = merged[merged["_merge"]=="both"].copy()
 
-            # Diferencias de monto
             coinc["_diff_monto_abs"] = (coinc["_MONTO__A"] - coinc["_MONTO__B"]).abs()
             diff_monto = coinc[coinc["_diff_monto_abs"] > tolerancia].copy()
 
-            # Diferencias de fecha (si existen)
             diff_fecha = pd.DataFrame()
             if "_FECHA__A" in coinc.columns and "_FECHA__B" in coinc.columns:
-                diff_fecha = coinc[
-                    (~coinc["_FECHA__A"].isna()) & (~coinc["_FECHA__B"].isna()) & (coinc["_FECHA__A"] != coinc["_FECHA__B"])
-                ][["_CLAVE_","_FECHA__A","_FECHA__B"]].copy()
+                diff_fecha = coinc[(~coinc["_FECHA__A"].isna()) & (~coinc["_FECHA__B"].isna()) & (coinc["_FECHA__A"] != coinc["_FECHA__B"])][["_CLAVE_","_FECHA__A","_FECHA__B"]].copy()
 
-            # KPIs
             c1, c2, c3 = st.columns(3)
-            c1.metric("Solo en A", len(solo_A))
-            c2.metric("Solo en B", len(solo_B))
-            c3.metric("Dif. de monto", len(diff_monto))
+            c1.metric("Solo en A", len(solo_A)); c2.metric("Solo en B", len(solo_B)); c3.metric("Dif. de monto", len(diff_monto))
 
             with st.expander("🟦 Solo en A"):
-                st.dataframe(solo_A)
-                st.download_button("⬇️ Descargar Solo en A (CSV)", to_csv_bytes(solo_A), "solo_en_A.csv", "text/csv")
-
+                st.dataframe(solo_A); st.download_button("⬇️ Descargar Solo en A (CSV)", to_csv_bytes(solo_A), "solo_en_A.csv", "text/csv")
             with st.expander("🟧 Solo en B"):
-                st.dataframe(solo_B)
-                st.download_button("⬇️ Descargar Solo en B (CSV)", to_csv_bytes(solo_B), "solo_en_B.csv", "text/csv")
-
+                st.dataframe(solo_B); st.download_button("⬇️ Descargar Solo en B (CSV)", to_csv_bytes(solo_B), "solo_en_B.csv", "text/csv")
             with st.expander("🟥 Coincidentes con diferencias de monto"):
-                mostrar = ["._CLAVE_".replace(".", ""),"_MONTO__A","_MONTO__B","_diff_monto_abs"]
-                if "_FECHA__A" in diff_monto.columns: mostrar.append("_FECHA__A")
-                if "_FECHA__B" in diff_monto.columns: mostrar.append("_FECHA__B")
-                st.dataframe(diff_monto[mostrar])
+                mostrar = ["_CLAVE_","._MONTO__A".replace(".",""),"_MONTO__B","_diff_monto_abs"]
+                st.dataframe(diff_monto[["_CLAVE_","_MONTO__A","_MONTO__B","_diff_monto_abs"]])
                 st.download_button("⬇️ Descargar Diferencias de Monto (CSV)", to_csv_bytes(diff_monto), "diferencias_monto.csv", "text/csv")
-
             if not diff_fecha.empty:
                 with st.expander("🟨 Coincidentes con diferencias de fecha"):
                     st.dataframe(diff_fecha)
                     st.download_button("⬇️ Descargar Diferencias de Fecha (CSV)", to_csv_bytes(diff_fecha), "diferencias_fecha.csv", "text/csv")
-
     except Exception as e:
         st.error(f"❌ Error en conciliación: {e}")
 
 # ======================================================
 # 4) CAAT – Ley de Benford aplicada a transacciones
 # ======================================================
-st.header("4️⃣ Ley de Benford aplicada a transacciones")
+section_intro("4️⃣", "Ley de Benford aplicada a transacciones",
+              "Contrasta el primer dígito de los montos con la distribución esperada por Benford y calcula χ² para evidenciar anomalías.")
+
 file_benford = st.file_uploader("📁 Subir archivo (CSV/XLSX/XLS/TXT)", type=["csv","xlsx","xls","txt"], key="benford")
 
 def first_digit_series(series: pd.Series) -> pd.Series:
-    # Asegura numérico robusto
-    if series.dtype == object:
-        x = coerce_amount(series)
-    else:
-        x = pd.to_numeric(series, errors="coerce")
-    x = x.abs()
-    x = x[x > 0].dropna()
+    if series.dtype == object: x = coerce_amount(series)
+    else: x = pd.to_numeric(series, errors="coerce")
+    x = x.abs(); x = x[x > 0].dropna()
     s = x.apply(lambda v: f"{v:.15g}")
     s = s.str.replace(".", "", regex=False).str.lstrip("0")
     first = s.str[0].dropna()
@@ -329,55 +333,55 @@ def first_digit_series(series: pd.Series) -> pd.Series:
     return first.astype(int)
 
 def benford_expected() -> pd.Series:
-    d = np.arange(1, 10)
-    p = np.log10(1 + 1/d)
+    d = np.arange(1, 10); p = np.log10(1 + 1/d)
     return pd.Series(p, index=d)
 
 if file_benford:
     try:
-        dfb = load_any(file_benford, widget_key="sheet_benford")
-        dfb = normalize_headers(dfb)
+        dfb = load_any(file_benford, widget_key="sheet_benford"); dfb = normalize_headers(dfb)
         st.success(f"✅ Archivo cargado. Filas: {len(dfb)}")
-        with st.expander("Ver primeras filas"):
-            st.dataframe(dfb.head())
+        with st.expander("Ver primeras filas"): st.dataframe(dfb.head())
 
-        sugerida_monto_b = col_auto(dfb, SINONIMOS_MONTO) or (dfb.select_dtypes(include="number").columns.tolist()[:1] or [None])[0]
-        col_monto_b = st.selectbox("💰 Columna de monto", dfb.columns.tolist(),
-                                   index=(dfb.columns.tolist().index(sugerida_monto_b) if sugerida_monto_b in dfb.columns else 0))
+        # Columnas candidatas a monto (numéricas o texto convertible en ≥30%)
+        def is_amount_candidate(s: pd.Series) -> bool:
+            if pd.api.types.is_numeric_dtype(s): return True
+            if s.dtype == object:
+                conv = coerce_amount(s); return conv.notna().mean() >= 0.30
+            return False
+        candidatas = [c for c in dfb.columns if is_amount_candidate(dfb[c])]
+        if not candidatas:
+            st.error("No se hallaron columnas de monto válidas. Debe existir una columna numérica o convertible.")
+            st.stop()
+
+        sugerida_monto_b = col_auto(dfb[candidatas], SINONIMOS_MONTO) or candidatas[0]
+        col_monto_b = st.selectbox("💰 Columna de monto", candidatas, index=(candidatas.index(sugerida_monto_b) if sugerida_monto_b in candidatas else 0))
         min_val = st.number_input("🔻 Ignorar montos menores a (opcional)", min_value=0.0, value=0.0)
         min_count_alert = st.number_input("🔔 Mínimo sugerido de observaciones", min_value=0, value=100)
 
         if st.button("🔍 Ejecutar Benford"):
-            serie = dfb[col_monto_b]
-            if serie.dtype == object:
-                serie = coerce_amount(serie)
+            serie = dfb[col_monto_b]; 
+            if serie.dtype == object: serie = coerce_amount(serie)
             base = pd.to_numeric(serie, errors="coerce").dropna()
-            if min_val > 0:
-                base = base[base.abs() >= min_val]
+            if min_val > 0: base = base[base.abs() >= min_val]
 
-            fd = first_digit_series(base)
-            n = len(fd)
+            fd = first_digit_series(base); n = len(fd)
             if n == 0:
                 st.error("❌ No hay suficientes datos numéricos válidos tras la limpieza/filtros.")
             else:
                 obs_counts = fd.value_counts().reindex(range(1,10), fill_value=0).sort_index()
                 obs_prop = obs_counts / n
-                exp_prop = benford_expected()
-                exp_counts = (exp_prop * n)
+                exp_prop = benford_expected(); exp_counts = (exp_prop * n)
                 chi2 = (((obs_counts - exp_counts) ** 2) / exp_counts.replace(0, np.nan)).sum()
                 chi2_crit = 15.507  # α=0.05, gl=8
                 cumple = chi2 <= chi2_crit
 
                 st.subheader("📊 Resumen Benford")
                 c1, c2, c3 = st.columns(3)
-                c1.metric("Observaciones válidas", n)
-                c2.metric("Chi-cuadrado", f"{chi2:,.3f}")
-                c3.metric("¿Cumple (α=0.05)?", "Sí ✅" if cumple else "No ⚠️")
-                if n < min_count_alert:
-                    st.info(f"ℹ️ Nota: {n} observaciones; sugerido ≥ {min_count_alert} para mayor robustez.")
+                c1.metric("Observaciones válidas", n); c2.metric("Chi-cuadrado", f"{chi2:,.3f}"); c3.metric("¿Cumple (α=0.05)?", "Sí ✅" if cumple else "No ⚠️")
+                if n < min_count_alert: st.info(f"ℹ️ Nota: {n} observaciones; sugerido ≥ {min_count_alert} para mayor robustez.")
 
                 tabla = pd.DataFrame({
-                    "Dígito": list(range(1,9+1)),
+                    "Dígito": list(range(1,10)),
                     "Frecuencia Observada": obs_counts.values,
                     "Proporción Observada": (obs_prop.values * 100).round(2),
                     "Proporción Esperada (Benford %)": (exp_prop.values * 100).round(2),
@@ -389,38 +393,31 @@ if file_benford:
                 idx = np.arange(1, 10)
                 ax.bar(idx - 0.15, obs_prop.values, width=0.3, label="Observado")
                 ax.bar(idx + 0.15, exp_prop.values, width=0.3, label="Esperado (Benford)")
-                ax.set_xticks(idx)
-                ax.set_xlabel("Primer dígito")
-                ax.set_ylabel("Proporción")
-                ax.set_title("Ley de Benford: Observado vs. Esperado")
-                ax.legend()
+                ax.set_xticks(idx); ax.set_xlabel("Primer dígito"); ax.set_ylabel("Proporción"); ax.set_title("Ley de Benford: Observado vs. Esperado"); ax.legend()
                 st.pyplot(fig)
 
                 st.download_button("⬇️ Descargar tabla Benford (CSV)", to_csv_bytes(tabla), "benford_resultados.csv", "text/csv")
-
     except Exception as e:
         st.error(f"❌ Error en Benford: {e}")
 
 # ======================================================
 # 5) CAAT – Análisis de Concentración de Clientes/Proveedores
 # ======================================================
-st.header("5️⃣ Análisis de Concentración de Clientes o Proveedores")
+section_intro("5️⃣", "Análisis de Concentración de Clientes o Proveedores",
+              "Mide participación y acumulado por entidad, calcula HHI y muestra Top N y Curva de Lorenz para detectar dependencias.")
+
 file_conc = st.file_uploader("📁 Subir archivo de ventas o compras (CSV/XLSX/XLS/TXT)", type=["csv","xlsx","xls","txt"], key="conc_file")
 
 if file_conc:
     try:
-        dfc = load_any(file_conc, widget_key="sheet_conc")
-        dfc = normalize_headers(dfc)
+        dfc = load_any(file_conc, widget_key="sheet_conc"); dfc = normalize_headers(dfc)
         st.success(f"✅ Archivo cargado. Filas: {len(dfc)}")
-        with st.expander("Ver primeras filas"):
-            st.dataframe(dfc.head())
+        with st.expander("Ver primeras filas"): st.dataframe(dfc.head())
 
         entidad_col = st.selectbox("🏷️ Columna de entidad (Cliente/Proveedor)", dfc.columns.tolist())
-
         numeric_cols = dfc.select_dtypes(include='number').columns.tolist()
         col_monto_default = numeric_cols[0] if numeric_cols else dfc.columns[0]
-        monto_col = st.selectbox("💰 Columna de monto", dfc.columns.tolist(),
-                                 index=(dfc.columns.tolist().index(col_monto_default) if col_monto_default in dfc.columns else 0))
+        monto_col = st.selectbox("💰 Columna de monto", dfc.columns.tolist(), index=(dfc.columns.tolist().index(col_monto_default) if col_monto_default in dfc.columns else 0))
 
         sentido = st.radio("Tipo de análisis", ["Clientes (ventas)", "Proveedores (compras)"], horizontal=True)
         umbral_flag = st.number_input("🎯 Umbral de concentración para marcar (ej. 40%)", min_value=0.0, max_value=100.0, value=40.0)
@@ -428,8 +425,7 @@ if file_conc:
 
         if st.button("🔍 Calcular concentración"):
             serie_monto = dfc[monto_col]
-            if serie_monto.dtype == object:
-                serie_monto = coerce_amount(serie_monto)
+            if serie_monto.dtype == object: serie_monto = coerce_amount(serie_monto)
             dfc["_MONTO_"] = pd.to_numeric(serie_monto, errors="coerce")
 
             base = dfc.dropna(subset=[entidad_col, "_MONTO_"]).copy()
@@ -438,39 +434,46 @@ if file_conc:
             ag = (base.groupby(entidad_col, dropna=True)
                         .agg(Total=("_MONTO_", "sum"),
                              Transacciones=("_MONTO_", "count"))
-                        .reset_index())
+                        .reset_index()) \
+                        .sort_values("Total", ascending=False)
 
-            ag = ag.sort_values("Total", ascending=False)
             total_general = ag["Total"].sum()
             ag["Participacion_%"] = (ag["Total"] / total_general * 100).round(2)
             ag["Acumulado_%"] = ag["Participacion_%"].cumsum().round(2)
 
             def cum_share(k):
                 return ag["Participacion_%"].iloc[:k].sum() if len(ag) >= k else ag["Participacion_%"].sum()
-
-            top1 = cum_share(1)
-            top3 = cum_share(3)
-            top5 = cum_share(5)
-            top10 = cum_share(10)
+            top1, top3, top5, top10 = cum_share(1), cum_share(3), cum_share(5, ), cum_share(10)
 
             shares = ag["Participacion_%"] / 100.0
             hhi = int((shares.pow(2).sum() * 10000).round(0))
 
             st.subheader("📊 Indicadores de concentración")
             c1, c2, c3, c4, c5 = st.columns(5)
-            c1.metric("Top 1", f"{top1:.2f}%")
-            c2.metric("Top 3", f"{top3:.2f}%")
-            c3.metric("Top 5", f"{top5:.2f}%")
-            c4.metric("Top 10", f"{top10:.2f}%")
-            c5.metric("HHI", f"{hhi}")
+            c1.metric("Top 1", f"{top1:.2f}%"); c2.metric("Top 3", f"{top3:.2f}%"); c3.metric("Top 5", f"{top5:.2f}%"); c4.metric("Top 10", f"{top10:.2f}%"); c5.metric("HHI", f"{hhi}")
 
-            st.subheader("📄 Tabla de concentración por entidad")
-            st.dataframe(ag)
-
+            # --- marcados por umbral de participación ---
+            mostrar_solo_umbral = st.checkbox("🔎 Mostrar solo entidades con participación ≥ umbral", value=False)
             marcados = ag[ag["Participacion_%"] >= umbral_flag]
-            if not marcados.empty:
-                st.warning(f"⚠️ Entidades con participación ≥ {umbral_flag:.0f}%: {len(marcados)}")
-                st.dataframe(marcados)
+            tabla_mostrar = marcados.copy() if mostrar_solo_umbral else ag.copy()
+
+            st.subheader("📄 Tabla de concentración por entidad"); st.dataframe(tabla_mostrar)
+            if mostrar_solo_umbral:
+                if marcados.empty:
+                    st.info(f"No hay entidades con participación ≥ {umbral_flag:.0f}%. Prueba con un umbral menor (ej. 1% o 0.5%).")
+                else:
+                    st.success(f"{len(marcados)} entidades con participación ≥ {umbral_flag:.0f}%")
+                    st.download_button("⬇️ Descargar marcados (CSV)", to_csv_bytes(marcados), "entidades_marcadas_umbral.csv", "text/csv")
+            else:
+                st.download_button("⬇️ Descargar tabla completa (CSV)", to_csv_bytes(ag), "concentracion_entidades.csv", "text/csv")
+
+            # --- Pareto por acumulado ---
+            umbral_acum = st.number_input("📈 Umbral de acumulado para Pareto (ej. 80%)", min_value=1.0, max_value=100.0, value=80.0, step=1.0)
+            idx_pareto = (ag["Acumulado_%"] >= umbral_acum).idxmax() if not ag.empty else None
+            if idx_pareto is not None and not np.isnan(idx_pareto):
+                n_pareto = ag.index.get_loc(idx_pareto) + 1
+                st.metric(f"Nº mínimo de entidades para llegar al {umbral_acum:.0f}%", n_pareto)
+                st.download_button(f"⬇️ Descargar TOP {n_pareto} (CSV)", to_csv_bytes(ag.head(n_pareto)), f"top_{n_pareto}_hasta_{int(umbral_acum)}pct.csv", "text/csv")
 
             # Gráfico 1: Top N barras
             fig1, ax1 = plt.subplots()
@@ -483,22 +486,12 @@ if file_conc:
 
             # Gráfico 2: Curva de Lorenz
             shares_sorted = np.sort(shares.values)
-            lorenz = np.cumsum(shares_sorted)
-            lorenz = np.insert(lorenz, 0, 0)
+            lorenz = np.cumsum(shares_sorted); lorenz = np.insert(lorenz, 0, 0)
             x = np.linspace(0.0, 1.0, len(lorenz))
             fig2, ax2 = plt.subplots()
-            ax2.plot(x, lorenz, label="Curva de Lorenz")
-            ax2.plot([0,1], [0,1], linestyle="--", label="Igualdad perfecta")
-            ax2.set_title(f"Curva de Lorenz – {sentido}")
-            ax2.set_xlabel("Proporción de entidades")
-            ax2.set_ylabel("Proporción acumulada de monto")
-            ax2.legend()
+            ax2.plot(x, lorenz, label="Curva de Lorenz"); ax2.plot([0,1], [0,1], linestyle="--", label="Igualdad perfecta")
+            ax2.set_title(f"Curva de Lorenz – {sentido}"); ax2.set_xlabel("Proporción de entidades"); ax2.set_ylabel("Proporción acumulada de monto"); ax2.legend()
             st.pyplot(fig2)
-
-            st.download_button("⬇️ Descargar tabla (CSV)", to_csv_bytes(ag), "concentracion_entidades.csv", "text/csv")
-            if not marcados.empty:
-                st.download_button("⬇️ Descargar marcados por umbral (CSV)", to_csv_bytes(marcados),
-                                   "entidades_marcadas_umbral.csv", "text/csv")
 
     except Exception as e:
         st.error(f"❌ Error en análisis de concentración: {e}")
