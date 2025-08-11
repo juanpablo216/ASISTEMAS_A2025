@@ -124,7 +124,6 @@ def col_auto(df, candidatos):
     return None
 
 def coerce_amount(series):
-    # '1.234,56' -> 1234.56 y '1,234.56' -> 1234.56
     s = series.astype(str)
     s = s.str.replace(r"\.", "", regex=True)  # remover miles con punto
     s = s.str.replace(",", ".", regex=False)  # coma -> punto
@@ -174,7 +173,7 @@ if file_dup:
         st.error(f"❌ Error: {e}")
 
 # ======================================================
-# 2) CAAT – Detección de Montos Inusuales (fijo o estadístico)
+# 2) CAAT – Detección de Montos Inusuales
 # ======================================================
 section_intro("2️⃣", "Detección de Montos Inusuales",
               "Encuentra transacciones que superan un umbral (fijo o estadístico) para resaltar operaciones atípicas o de riesgo.")
@@ -230,7 +229,7 @@ if file_unusual:
         st.error(f"❌ Error: {e}")
 
 # ======================================================
-# 3) CAAT – Conciliación de Reportes (A vs B, robusto)
+# 3) CAAT – Conciliación de Reportes (A vs. B)
 # ======================================================
 section_intro("3️⃣", "Conciliación de Reportes (A vs. B)",
               "Compara dos archivos (p. ej., facturación y contabilidad) y reporta: Solo en A, Solo en B y diferencias de monto/fecha.")
@@ -304,7 +303,6 @@ if file_A and file_B:
             with st.expander("🟧 Solo en B"):
                 st.dataframe(solo_B); st.download_button("⬇️ Descargar Solo en B (CSV)", to_csv_bytes(solo_B), "solo_en_B.csv", "text/csv")
             with st.expander("🟥 Coincidentes con diferencias de monto"):
-                mostrar = ["_CLAVE_","._MONTO__A".replace(".",""),"_MONTO__B","_diff_monto_abs"]
                 st.dataframe(diff_monto[["_CLAVE_","_MONTO__A","_MONTO__B","_diff_monto_abs"]])
                 st.download_button("⬇️ Descargar Diferencias de Monto (CSV)", to_csv_bytes(diff_monto), "diferencias_monto.csv", "text/csv")
             if not diff_fecha.empty:
@@ -315,7 +313,7 @@ if file_A and file_B:
         st.error(f"❌ Error en conciliación: {e}")
 
 # ======================================================
-# 4) CAAT – Ley de Benford aplicada a transacciones
+# 4) CAAT – Ley de Benford
 # ======================================================
 section_intro("4️⃣", "Ley de Benford aplicada a transacciones",
               "Contrasta el primer dígito de los montos con la distribución esperada por Benford y calcula χ² para evidenciar anomalías.")
@@ -401,7 +399,7 @@ if file_benford:
         st.error(f"❌ Error en Benford: {e}")
 
 # ======================================================
-# 5) CAAT – Análisis de Concentración de Clientes/Proveedores
+# 5) CAAT – Concentración de Clientes/Proveedores
 # ======================================================
 section_intro("5️⃣", "Análisis de Concentración de Clientes o Proveedores",
               "Mide participación y acumulado por entidad, calcula HHI y muestra Top N y Curva de Lorenz para detectar dependencias.")
@@ -420,7 +418,7 @@ if file_conc:
         monto_col = st.selectbox("💰 Columna de monto", dfc.columns.tolist(), index=(dfc.columns.tolist().index(col_monto_default) if col_monto_default in dfc.columns else 0))
 
         sentido = st.radio("Tipo de análisis", ["Clientes (ventas)", "Proveedores (compras)"], horizontal=True)
-        umbral_flag = st.number_input("🎯 Umbral de concentración para marcar (ej. 40%)", min_value=0.0, max_value=100.0, value=40.0)
+        umbral_flag = st.number_input("🎯 Umbral de participación para marcar (ej. 40%)", min_value=0.0, max_value=100.0, value=40.0)
         top_n = st.slider("👑 Mostrar Top N en gráfico de barras", min_value=3, max_value=20, value=10)
 
         if st.button("🔍 Calcular concentración"):
@@ -443,14 +441,15 @@ if file_conc:
 
             def cum_share(k):
                 return ag["Participacion_%"].iloc[:k].sum() if len(ag) >= k else ag["Participacion_%"].sum()
-            top1, top3, top5, top10 = cum_share(1), cum_share(3), cum_share(5, ), cum_share(10)
+            top1, top3, top5, top10 = cum_share(1), cum_share(3), cum_share(5), cum_share(10)
 
             shares = ag["Participacion_%"] / 100.0
             hhi = int((shares.pow(2).sum() * 10000).round(0))
 
             st.subheader("📊 Indicadores de concentración")
             c1, c2, c3, c4, c5 = st.columns(5)
-            c1.metric("Top 1", f"{top1:.2f}%"); c2.metric("Top 3", f"{top3:.2f}%"); c3.metric("Top 5", f"{top5:.2f}%"); c4.metric("Top 10", f"{top10:.2f}%"); c5.metric("HHI", f"{hhi}")
+            c1.metric("Top 1", f"{top1:.2f}%"); c2.metric("Top 3", f"{top3:.2f}%")
+            c3.metric("Top 5", f"{top5:.2f}%"); c4.metric("Top 10", f"{top10:.2f}%"); c5.metric("HHI", f"{hhi}")
 
             # --- marcados por umbral de participación ---
             mostrar_solo_umbral = st.checkbox("🔎 Mostrar solo entidades con participación ≥ umbral", value=False)
