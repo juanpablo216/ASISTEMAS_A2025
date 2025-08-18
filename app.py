@@ -15,22 +15,18 @@ st.set_page_config(page_title="CAAT – Auditoría Automatizada", layout="wide")
 
 st.markdown("""
 <style>
-/* Contenedor más ancho y con aire */
-.main .block-container {max-width: 1250px; padding-top: 0.5rem; padding-bottom: 2.2rem;}
-/* Título principal */
-h1 { font-size: 34px !important; margin-bottom: .4rem !important; }
-/* Tabs grandes y visibles */
+.main .block-container {max-width: 1250px; padding-top: 0.6rem; padding-bottom: 2rem;}
+/* Tabs grandes y legibles */
 .stTabs [data-baseweb="tab-list"] { gap: 10px; }
-.stTabs [data-baseweb="tab"] {
+.stTabs [data-baseweb="tab"]{
   height: 60px; border-radius: 12px !important; padding: 14px 22px !important;
   background: #f6f7fb; border: 1px solid rgba(47,58,178,.15);
   font-size: 18px !important; font-weight: 700;
 }
-.stTabs [aria-selected="true"] {
-  background: #eef2ff !important; color: #2f3ab2 !important;
-  border: 2px solid #2f3ab2 !important;
+.stTabs [aria-selected="true"]{
+  background: #eef2ff !important; color: #2f3ab2 !important; border: 2px solid #2f3ab2 !important;
 }
-/* Tarjetas y acordeones */
+/* Tarjetas y inputs */
 .section-card {
   border: 1px solid rgba(125,125,125,.22);
   border-radius: 16px; padding: 18px 20px; margin: 16px 0 24px 0;
@@ -39,18 +35,16 @@ h1 { font-size: 34px !important; margin-bottom: .4rem !important; }
 }
 .section-title { font-size: 26px; font-weight: 800; margin-bottom: 6px; }
 .section-desc  { font-size: 17px; color:#374151; }
-/* File uploader más alto */
-[data-testid="stFileUploader"] {border-radius: 12px; border: 1px dashed rgba(125,125,125,.35); padding: 18px;}
-/* Botones redondeados */
-.stButton>button { border-radius: 999px !important; padding: .6rem 1.1rem; font-weight: 700; }
+[data-testid="stFileUploader"]{ border-radius:12px; border:1px dashed rgba(125,125,125,.35); padding:18px;}
+.stButton>button{ border-radius:999px !important; padding:.6rem 1.1rem; font-weight:700;}
 .big-warning { font-size: 16px; line-height: 1.35; }
 </style>
 """, unsafe_allow_html=True)
 
 st.title("🧪 Herramienta CAAT – Auditoría Automatizada")
-st.caption("Sube archivos y ejecuta las pruebas. Soporta **CSV/XLSX/XLS/TXT**. Descargas en **XLSX/DOCX**.")
+st.caption("Soporta **CSV/XLSX/XLS/TXT**. Resultados en **XLSX** y reportes en **DOCX**.")
 
-# ============================ Utilidades comunes ============================
+# ------------------- Utilidades comunes -------------------
 SINONIMOS_ID = ["idfactura","id_factura","numero","número","numerofactura","numero_factura",
     "serie","serie_comprobante","clave_acceso","idtransaccion","id_transaccion","referencia","doc","documento","id","idcliente","idproveedor"]
 SINONIMOS_MONTO = ["total","monto","importe","valor","monto_total","total_ingresado",
@@ -131,7 +125,7 @@ def docx_from_sections(title: str, sections: list[tuple[str, list[str]]]) -> byt
 
 # ============================ MÓDULO 1: Montos Inusuales ============================
 def ui_montos_inusuales():
-    st.markdown('<div class="section-card"><div class="section-title">2️⃣ Detección de Montos Inusuales</div><div class="section-desc">Encuentra transacciones que superan un umbral (fijo o estadístico) y descarga hallazgos en XLSX y un reporte detallado en DOCX.</div></div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-card"><div class="section-title">2️⃣ Detección de Montos Inusuales</div><div class="section-desc">Encuentra transacciones que superan un umbral (fijo o estadístico) y descarga hallazgos (XLSX) + reporte detallado (DOCX).</div></div>', unsafe_allow_html=True)
 
     file_unusual = st.file_uploader("📁 Subir archivo (CSV/XLSX/XLS/TXT)", type=["csv","xlsx","xls","txt"], key="unusual")
     if not file_unusual: return
@@ -146,7 +140,7 @@ def ui_montos_inusuales():
     col_id = st.selectbox("🔑 Columna identificadora (opcional)", ["(ninguna)"] + dfm.columns.tolist(), index=0)
     col_fecha_opt = st.selectbox("📅 Columna de fecha (opcional)", ["(ninguna)"] + dfm.columns.tolist(), index=0)
 
-    metodo = st.radio("Método", ["Umbral fijo", "Umbral estadístico (media + k·σ)"], horizontal=True)
+    metodo = st.radio("Método de detección", ["Umbral fijo", "Umbral estadístico (media + k·σ)"], horizontal=True)
     if metodo.startswith("Umbral fijo"):
         umbral = st.number_input("💵 Umbral fijo ($):", min_value=0.0, value=10000.0)
         ejecutar = st.button("🔍 Ejecutar (fijo)")
@@ -194,7 +188,6 @@ def ui_montos_inusuales():
         grp = (hall.groupby(col_id, dropna=False).agg(N=("_MONTO_","count"), Suma=("_MONTO_","sum"), Max=("_MONTO_","max"))
                      .sort_values("Suma", ascending=False).head(20))
 
-    # XLSX multi-hojas
     sheets = {"Hallazgos": hall,
               "ResumenEstadistico": pd.DataFrame({
                   "Métrica":["Transacciones","Hallazgos","% hallazgos","Suma total","Suma hallazgos","Criterio"],
@@ -208,7 +201,6 @@ def ui_montos_inusuales():
                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     with st.expander("Ver tabla de hallazgos", expanded=False): st.dataframe(hall.head(1000))
 
-    # DOCX detallado
     fecha_rango = "Sin fecha" if "_FECHA_" not in base.columns else f"{base['_FECHA_'].min()} → {base['_FECHA_'].max()}"
     bullets_resumen = [
         f"Archivo: {file_unusual.name}", f"Válidas: {total_tx}",
@@ -224,17 +216,17 @@ def ui_montos_inusuales():
             detalle.append("Top 5 por suma (ID): " + ", ".join([f"{i}: {v:,.2f}" for i,v in top_id.items()]))
 
     recomendaciones = [
-        "Solicitar respaldo documental (OC, contratos, aprobaciones) y verificar trazabilidad en el ERP.",
-        "Ejecutar revisiones dirigidas sobre los 20 mayores importes y 20 mayores z-scores.",
-        "Validar límites de aprobación/segregación; comparar con el flujo de autorizaciones efectivas.",
-        "Analizar concentración por ID, centro de costo y periodo; buscar patrones a fin de mes/cierre.",
+        "Solicitar respaldo (OC, contratos, aprobaciones) y verificar trazabilidad en el ERP.",
+        "Revisar los 20 mayores importes y los 20 mayores z-scores (muestreo dirigido).",
+        "Validar límites de aprobación/segregación vs. flujo real de autorizaciones.",
+        "Analizar concentración por ID/centro/periodo; buscar patrones a fin de mes/cierre.",
         "Cruzar con políticas de precios/ descuentos, impuestos y redondeos.",
         "Si el % supera materialidad, ampliar muestra y aplicar pruebas sustantivas adicionales."
     ]
     sections = [("RESUMEN", [f"• {x}" for x in bullets_resumen]),
                 ("DETALLE PRINCIPAL", [f"• {x}" for x in detalle] if detalle else ["• Sin detalles adicionales."]),
                 ("RECOMENDACIONES", [f"• {x}" for x in recomendaciones]),
-                ("REFERENCIA XLSX", ["• Ver 'montos_inusuales.xlsx' (Hoja Hallazgos, ResumenEstadistico, TopPorMonto, TopPorZscore, GrupoPorID si aplica)."])]
+                ("REFERENCIA XLSX", ["• 'montos_inusuales.xlsx' (Hoja Hallazgos, ResumenEstadistico, TopPorMonto, TopPorZscore, GrupoPorID si aplica)."])]
     st.download_button("⬇️ Descargar reporte (DOCX)",
                        docx_from_sections("Montos Inusuales – Reporte de Auditoría", sections),
                        "reporte_montos_inusuales.docx",
@@ -300,7 +292,6 @@ def ui_conciliacion():
     c1.metric("Solo en A", len(solo_A)); c2.metric("Solo en B", len(solo_B))
     c3.metric("Dif. monto", len(diff_monto)); c4.metric("Δ A-B", f"{delta_total:,.2f}")
 
-    # XLSX consolidado
     sheets = {
         "Resumen": pd.DataFrame({
             "Métrica":["Total A","Total B","Δ A-B","Solo en A (n)","Solo en B (n)","Dif. monto (n)","Dif. fecha (n)","Tolerancia"],
@@ -318,10 +309,8 @@ def ui_conciliacion():
         st.write("🟦 Solo en A"); st.dataframe(solo_A.head(1000))
         st.write("🟧 Solo en B"); st.dataframe(solo_B.head(1000))
         st.write("🟥 Diferencias de monto"); st.dataframe(diff_monto[["_CLAVE_","_MONTO__A","_MONTO__B","_diff_monto","_diff_monto_abs"]].head(1000))
-        if not diff_fecha.empty:
-            st.write("🟨 Diferencias de fecha"); st.dataframe(diff_fecha.head(1000))
+        if not diff_fecha.empty: st.write("🟨 Diferencias de fecha"); st.dataframe(diff_fecha.head(1000))
 
-    # DOCX detallado
     top_dif = diff_monto.sort_values("_diff_monto_abs", ascending=False).head(10)
     pos = diff_monto[diff_monto["_diff_monto"] > 0]["_diff_monto"].sum()
     neg = diff_monto[diff_monto["_diff_monto"] < 0]["_diff_monto"].sum()
@@ -336,15 +325,15 @@ def ui_conciliacion():
            for _,r in top_dif.iterrows()] or ["No hay diferencias de monto sobre la tolerancia."]
     rec = [
         "Revisar interfaz/logs, horarios de corte y reprocesos entre A y B.",
-        "En diferencias de monto: confirmar TC, descuentos, impuestos, notas de crédito, redondeos.",
+        "En diferencias de monto: confirmar TC, descuentos, impuestos, NC y redondeos.",
         "Descartar asientos manuales fuera del flujo; revisar bitácoras y perfiles.",
-        "Establecer conciliaciones automáticas periódicas con umbrales por tipo de transacción.",
+        "Conciliaciones automáticas periódicas con umbrales por tipo de transacción.",
         "Investigar Solo en A/B: reprocesar interfaz y validar dependencia temporal (cierres)."
     ]
     sections = [("RESUMEN", [f"• {x}" for x in bullets]),
                 ("TOP 10 DIFERENCIAS", [f"• {x}" for x in det]),
                 ("RECOMENDACIONES", [f"• {x}" for x in rec]),
-                ("REFERENCIA XLSX", ["• Ver 'hallazgos_conciliacion.xlsx' (Resumen, Solo_en_A, Solo_en_B, Diferencias_Monto, Diferencias_Fecha)."])]
+                ("REFERENCIA XLSX", ["• 'hallazgos_conciliacion.xlsx' (Resumen, Solo_en_A, Solo_en_B, Diferencias_Monto, Diferencias_Fecha)."])]
     st.download_button("⬇️ Descargar reporte (DOCX)",
                        docx_from_sections("Conciliación A vs. B – Reporte de Auditoría", sections),
                        "reporte_conciliacion.docx",
@@ -405,7 +394,7 @@ def ui_benford():
     if min_val>0: serie_num = serie_num[serie_num.abs() >= min_val]
 
     n_total = len(serie_num)
-    fd = first_digit_series(serie_num)     # FIX: Series, no ndarray
+    fd = first_digit_series(serie_num)     # Series, no ndarray
     n = len(fd)
     if n==0: st.error("No hay datos suficientes tras filtros."); return
 
@@ -485,7 +474,7 @@ def ui_benford():
                        "reporte_benford.docx",
                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 
-# ============================ Navegación en PESTAÑAS GRANDES ============================
+# ============================ Navegación en pestañas ============================
 tabs = st.tabs(["💥 Montos inusuales", "🔁 Conciliación A vs. B", "📈 Ley de Benford"])
 with tabs[0]:
     ui_montos_inusuales()
