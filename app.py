@@ -3,7 +3,12 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import io, csv
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from docx import Document
+from docx.shared import Pt
+from datetime import datetime
 
 # ==============================
 # Configuración general
@@ -12,23 +17,23 @@ st.set_page_config(page_title="CAAT – Auditoría Automatizada", layout="wide")
 st.title("🧪 Herramienta CAAT – Auditoría Automatizada")
 st.markdown("Sube archivos y ejecuta las pruebas en cada sección. Soporta **CSV/XLSX/XLS/TXT**.")
 
-# ===== UI sugar: estilos, helper y sidebar =====
+# ===== Estilos y helper UI =====
 st.markdown("""
 <style>
-.main .block-container {max-width: 1200px; padding-top: 1rem; padding-bottom: 2rem;}
-h1, h2, h3 { letter-spacing: .2px; }
+.main .block-container {max-width: 1200px; padding-top: .5rem; padding-bottom: 2rem;}
 .section-card {
-  border: 1px solid rgba(125,125,125,.2);
-  border-radius: 14px; padding: 14px 18px; margin: 12px 0 22px 0;
-  background: rgba(200,200,255,.06);
+  border: 1px solid rgba(125,125,125,.25);
+  border-radius: 14px; padding: 16px 18px; margin: 18px 0 18px 0;
+  background: rgba(200,200,255,.07);
 }
+.section-title { font-size: 26px; font-weight: 800; margin-bottom: 6px; }
+.section-desc  { font-size: 16px; color:#374151; }
 .badge {
   display: inline-block; padding: 4px 10px; border-radius: 999px;
   background: #eef2ff; color: #2f3ab2; font-size: 12px; font-weight: 600; margin-left: 6px;
   border: 1px solid rgba(47,58,178,.15);
 }
-.small { color:#6b7280; font-size: 13px; }
-hr { border: none; border-top: 1px solid rgba(125,125,125,.2); margin: 12px 0 18px;}
+.big-warning { font-size: 16px; line-height: 1.35; }
 [data-testid="stFileUploader"] {border-radius: 12px; border: 1px dashed rgba(125,125,125,.35); padding: 14px;}
 .stButton>button { border-radius: 999px !important; padding: .55rem 1rem; font-weight: 600; }
 </style>
@@ -37,36 +42,29 @@ hr { border: none; border-top: 1px solid rgba(125,125,125,.2); margin: 12px 0 18
 def section_intro(n, title, desc):
     st.markdown(f"""
 <div class="section-card">
-  <h2>{n} {title} <span class="badge">CSV/XLSX/XLS/TXT</span></h2>
-  <div class="small">{desc}</div>
+  <div class="section-title">{n} {title} <span class="badge">CSV/XLSX/XLS/TXT</span></div>
+  <div class="section-desc">{desc}</div>
 </div>
 """, unsafe_allow_html=True)
 
 with st.sidebar:
     st.markdown("### 🧭 Navegación")
-    st.write("1) Duplicados\n\n2) Montos inusuales\n\n3) Conciliación\n\n4) Benford\n\n5) Concentración")
+    st.write("2) Montos inusuales\n\n3) Conciliación A vs B\n\n4) Benford")
     st.markdown("---")
     st.markdown("### 💡 Consejos")
-    st.caption("- Para Benford, elige una columna **numérica** de montos.\n- En Conciliación, usa una **clave** común (ID/Numero/Referencia).\n- Si tu CSV usa **;** o **|**, la app lo detecta automáticamente.")
+    st.caption("- Benford: usa una **columna de montos** (no IDs) y muestra grande de datos.\n- Conciliación: define **columna clave** y tolerancia.\n- Descargas: resultados en **XLSX** y reportes en **DOCX**.")
     st.markdown("---")
     st.caption("Versión CAAT A-2025 • Streamlit")
 
 # ==============================
-# Utilidades comunes y robustas
+# Utilidades de lectura y helpers
 # ==============================
-SINONIMOS_ID = [
-    "idfactura","id_factura","numero","número","numerofactura","numero_factura",
-    "serie","serie_comprobante","clave_acceso","idtransaccion","id_transaccion",
-    "referencia","doc","documento"
-]
-SINONIMOS_MONTO = [
-    "total","monto","importe","valor","monto_total","total_ingresado",
-    "importe_total","importe neto","subtotal+iva","total factura","totalfactura"
-]
-SINONIMOS_FECHA = [
-    "fecha","fecha_emision","fecha emisión","f_emision","fecha documento",
-    "fecha_doc","fechadoc","fecha fact","fecha factura","emision"
-]
+SINONIMOS_ID = ["idfactura","id_factura","numero","número","numerofactura","numero_factura",
+    "serie","serie_comprobante","clave_acceso","idtransaccion","id_transaccion","referencia","doc","documento"]
+SINONIMOS_MONTO = ["total","monto","importe","valor","monto_total","total_ingresado",
+    "importe_total","importe neto","subtotal+iva","total factura","totalfactura"]
+SINONIMOS_FECHA = ["fecha","fecha_emision","fecha emisión","f_emision","fecha documento",
+    "fecha_doc","fechadoc","fecha fact","fecha factura","emision"]
 
 def sniff_delimiter(sample_bytes: bytes):
     try:
@@ -132,51 +130,27 @@ def coerce_amount(series):
 def coerce_date(series):
     return pd.to_datetime(series, errors="coerce", dayfirst=True)
 
-def to_csv_bytes(df):
-    return df.to_csv(index=False).encode("utf-8")
+def to_xlsx_bytes(df: pd.DataFrame, sheet_name="Hoja1") -> bytes:
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name=sheet_name)
+    return buffer.getvalue()
+
+def docx_bytes_from_text(title: str, paragraphs: list[str]) -> bytes:
+    d = Document()
+    d.add_heading(title, level=1)
+    for p in paragraphs:
+        par = d.add_paragraph(p)
+        par.style.font.size = Pt(11)
+    b = io.BytesIO()
+    d.save(b)
+    return b.getvalue()
 
 # ======================================================
-# 1) CAAT – Detección de Facturas Duplicadas
-# ======================================================
-section_intro("1️⃣", "Detección de Facturas Duplicadas",
-              "Identifica facturas repetidas comparando número, RUC, fecha y total para prevenir pagos duplicados o errores.")
-
-file_dup = st.file_uploader("📁 Subir archivo para duplicados (CSV/XLSX/XLS/TXT)", type=["csv","xlsx","xls","txt"], key="dup")
-
-def detectar_duplicados(df):
-    combinaciones = [
-        ['Número', 'R.U.C.', 'Total', 'Fecha'],
-        ['SERIE_COMPROBANTE', 'RUC_EMISOR', 'IMPORTE_TOTAL', 'FECHA_EMISION'],
-        ['NumeroFactura', 'IDProveedor', 'MontoTotal', 'FechaEmision']
-    ]
-    for campos in combinaciones:
-        if all(col in df.columns for col in campos):
-            return df[df.duplicated(subset=campos, keep=False)], campos
-    return pd.DataFrame(), []
-
-if file_dup:
-    try:
-        df = load_any(file_dup, widget_key="sheet_dup")
-        df = normalize_headers(df)
-        st.success(f"✅ Archivo cargado. Filas: {len(df)}")
-        with st.expander("Ver primeras filas"):
-            st.dataframe(df.head())
-
-        duplicados, campos = detectar_duplicados(df)
-        if not duplicados.empty:
-            st.warning(f"⚠️ Se encontraron {len(duplicados)} duplicados basados en: {', '.join(campos)}")
-            st.dataframe(duplicados)
-            st.download_button("⬇️ Descargar duplicados (CSV)", to_csv_bytes(duplicados), "duplicados.csv", "text/csv")
-        else:
-            st.success("✅ No se encontraron facturas duplicadas o no se detectaron columnas comunes.")
-    except Exception as e:
-        st.error(f"❌ Error: {e}")
-
-# ======================================================
-# 2) CAAT – Detección de Montos Inusuales
+# 2) CAAT – Detección de Montos Inusuales (mejorado)
 # ======================================================
 section_intro("2️⃣", "Detección de Montos Inusuales",
-              "Encuentra transacciones que superan un umbral (fijo o estadístico) para resaltar operaciones atípicas o de riesgo.")
+              "Encuentra transacciones que superan un umbral (fijo o estadístico) y genera un **reporte con recomendaciones** para el auditor.")
 
 file_unusual = st.file_uploader("📁 Subir archivo para montos inusuales (CSV/XLSX/XLS/TXT)", type=["csv","xlsx","xls","txt"], key="unusual")
 
@@ -188,17 +162,19 @@ if file_unusual:
         with st.expander("Ver primeras filas"):
             st.dataframe(dfm.head())
 
+        # Selección de columnas
         sugerida_monto = col_auto(dfm, SINONIMOS_MONTO) or (dfm.select_dtypes(include="number").columns.tolist()[:1] or [None])[0]
         col_monto = st.selectbox("💰 Columna de monto", dfm.columns.tolist(),
                                  index=(dfm.columns.tolist().index(sugerida_monto) if sugerida_monto in dfm.columns else 0))
+        col_id = st.selectbox("🔑 Columna identificadora (ID/Número/Referencia) (opcional)", ["(ninguna)"] + dfm.columns.tolist(), index=0)
 
-        metodo = st.radio("Método de detección", ["Umbral fijo", "Umbral estadístico"], horizontal=True)
+        metodo = st.radio("Método de detección", ["Umbral fijo", "Umbral estadístico (media + k·σ)"], horizontal=True)
         ejecutar = False
-        if metodo == "Umbral fijo":
+        if metodo.startswith("Umbral fijo"):
             umbral = st.number_input("💵 Umbral fijo ($):", min_value=0.0, value=10000.0)
             ejecutar = st.button("🔍 Ejecutar (fijo)")
         else:
-            k = st.slider("🔬 Coeficiente σ (media + k*desv)", min_value=1, max_value=5, value=2)
+            k = st.slider("🔬 k (media + k·σ)", min_value=1, max_value=5, value=2)
             ejecutar = st.button("🔍 Ejecutar (estadístico)")
 
         if ejecutar:
@@ -209,30 +185,66 @@ if file_unusual:
             dfm["_MONTO_"] = pd.to_numeric(serie_monto, errors="coerce")
             base = dfm.dropna(subset=["_MONTO_"]).copy()
 
-            if metodo == "Umbral fijo":
-                hallazgos = base[base["_MONTO_"] > umbral]
-                umbral_txt = f"{umbral:,.2f}"
+            if metodo.startswith("Umbral fijo"):
+                limite = umbral
+                criterio_txt = f"Umbral fijo = {umbral:,.2f}"
             else:
                 media = base["_MONTO_"].mean()
-                std = base["_MONTO_"].std()
+                std = base["_MONTO_"].std(ddof=0)
                 limite = media + k * std
-                hallazgos = base[base["_MONTO_"] > limite]
-                umbral_txt = f"{limite:,.2f} (media {media:,.2f} + {k}σ {std:,.2f})"
+                criterio_txt = f"Umbral estadístico = media {media:,.2f} + {k}·σ {std:,.2f} → {limite:,.2f}"
+
+            hallazgos = base[base["_MONTO_"] > limite].copy()
+            st.subheader("📊 Resultados")
+            st.write(f"**Criterio aplicado:** {criterio_txt}")
+            st.metric("Transacciones analizadas", len(base))
+            st.metric("Montos inusuales detectados", len(hallazgos))
 
             if not hallazgos.empty:
-                st.warning(f"⚠️ {len(hallazgos)} montos inusuales sobre el umbral: {umbral_txt}")
-                st.dataframe(hallazgos)
-                st.download_button("⬇️ Descargar resultados (CSV)", to_csv_bytes(hallazgos), "montos_inusuales.csv", "text/csv")
+                if col_id != "(ninguna)":
+                    cols_show = [col_id, col_monto]
+                else:
+                    cols_show = [col_monto]
+                cols_show = [c for c in cols_show if c in hallazgos.columns] + [c for c in hallazgos.columns if c not in cols_show][:6]
+                st.dataframe(hallazgos[cols_show])
+
+                # Descargas XLSX
+                st.download_button("⬇️ Descargar hallazgos (XLSX)",
+                                   to_xlsx_bytes(hallazgos, sheet_name="Montos_Inusuales"),
+                                   "montos_inusuales.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+                # Reporte DOCX con recomendaciones
+                recomendaciones = [
+                    "Validar la existencia y documentación de las transacciones detectadas (órdenes, contratos, aprobaciones).",
+                    "Solicitar explicaciones a los responsables de las áreas que originaron los movimientos.",
+                    "Revisar políticas de límites de aprobación y segregación de funciones.",
+                    "Aplicar procedimientos sustantivos adicionales (muestreo dirigido).",
+                    "Verificar que los asientos contables hayan sido revisados por un responsable distinto al preparador.",
+                    "Si hay patron recurrente por proveedor/centro de costo, evaluar riesgo de fraude o error sistemático."
+                ]
+                resumen = [
+                    f"Archivo analizado: {file_unusual.name}",
+                    f"Filas válidas: {len(base)}",
+                    f"Hallazgos: {len(hallazgos)}",
+                    f"Criterio: {criterio_txt}",
+                    f"Fecha de análisis: {datetime.now():%Y-%m-%d %H:%M}"
+                ]
+                doc_parrafos = ["RESUMEN:"] + [f"• {x}" for x in resumen] + ["", "RECOMENDACIONES:"] + [f"• {r}" for r in recomendaciones]
+                st.download_button("⬇️ Descargar reporte con recomendaciones (DOCX)",
+                                   docx_bytes_from_text("Montos Inusuales – Reporte de Auditoría", doc_parrafos),
+                                   "reporte_montos_inusuales.docx",
+                                   "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
             else:
-                st.success("✅ No se encontraron montos inusuales.")
+                st.success("✅ No se encontraron montos inusuales con el criterio seleccionado.")
+
     except Exception as e:
         st.error(f"❌ Error: {e}")
 
 # ======================================================
-# 3) CAAT – Conciliación de Reportes (A vs. B)
+# 3) CAAT – Conciliación de Reportes (A vs. B) + recomendaciones
 # ======================================================
 section_intro("3️⃣", "Conciliación de Reportes (A vs. B)",
-              "Compara dos archivos (p. ej., facturación y contabilidad) y reporta: Solo en A, Solo en B y diferencias de monto/fecha.")
+              "Compara dos archivos (p. ej., facturación y contabilidad) y genera un **informe para el auditor** con recomendaciones.")
 
 colA, colB = st.columns(2)
 with colA:
@@ -250,29 +262,36 @@ if file_A and file_B:
             st.write("A (preview)"); st.dataframe(A.head())
             st.write("B (preview)"); st.dataframe(B.head())
 
-        clave_sug = None
-        id_A = col_auto(A, SINONIMOS_ID); id_B = col_auto(B, SINONIMOS_ID)
-        if id_A and id_B and id_A in B.columns: clave_sug = id_A
-        else:
-            inter_cols = [c for c in A.columns if c in set(B.columns)]
-            if inter_cols: clave_sug = inter_cols[0]
+        # Auto sugerencias
+        comunes = [c for c in A.columns if c in set(B.columns)]
+        if not comunes:
+            st.error("❌ No hay columnas en común entre A y B.")
+            st.stop()
 
+        def col_auto(df, candidatos):
+            cols_norm = {c.lower().strip(): c for c in df.columns}
+            for alias in candidatos:
+                if alias in cols_norm:
+                    return cols_norm[alias]
+            for c in df.columns:
+                if any(alias in c.lower() for alias in candidatos):
+                    return c
+            return None
+
+        clave_sug = col_auto(A, SINONIMOS_ID) if col_auto(A, SINONIMOS_ID) in comunes else comunes[0]
         montoA_sug = col_auto(A, SINONIMOS_MONTO) or (A.select_dtypes(include="number").columns.tolist()[:1] or [None])[0]
         montoB_sug = col_auto(B, SINONIMOS_MONTO) or (B.select_dtypes(include="number").columns.tolist()[:1] or [None])[0]
         fechaA_sug = col_auto(A, SINONIMOS_FECHA)
         fechaB_sug = col_auto(B, SINONIMOS_FECHA)
 
         st.subheader("🔧 Configuración")
-        comunes = [c for c in A.columns if c in set(B.columns)]
-        if not comunes:
-            st.error("❌ No hay columnas en común entre A y B.")
-            st.stop()
-
-        clave = st.selectbox("🔑 Columna clave común", comunes, index=(comunes.index(clave_sug) if (clave_sug in comunes) else 0))
+        clave = st.selectbox("🔑 Columna clave común", comunes, index=comunes.index(clave_sug) if clave_sug in comunes else 0)
         monto_A = st.selectbox("💰 Columna de monto en A", A.columns.tolist(), index=(A.columns.tolist().index(montoA_sug) if (montoA_sug in A.columns) else 0))
         monto_B = st.selectbox("💰 Columna de monto en B", B.columns.tolist(), index=(B.columns.tolist().index(montoB_sug) if (montoB_sug in B.columns) else 0))
-        fecha_A_opt = st.selectbox("📅 Columna de fecha en A (opcional)", ["(ninguna)"] + A.columns.tolist(), index=(["(ninguna)"] + A.columns.tolist()).index(fechaA_sug) if (fechaA_sug in (A.columns if A is not None else [])) else 0)
-        fecha_B_opt = st.selectbox("📅 Columna de fecha en B (opcional)", ["(ninguna)"] + B.columns.tolist(), index=(["(ninguna)"] + B.columns.tolist()).index(fechaB_sug) if (fechaB_sug in (B.columns if B is not None else [])) else 0)
+        fecha_A_opt = st.selectbox("📅 Columna de fecha en A (opcional)", ["(ninguna)"] + A.columns.tolist(),
+                                   index=(["(ninguna)"] + A.columns.tolist()).index(fechaA_sug) if (fechaA_sug in A.columns) else 0)
+        fecha_B_opt = st.selectbox("📅 Columna de fecha en B (opcional)", ["(ninguna)"] + B.columns.tolist(),
+                                   index=(["(ninguna)"] + B.columns.tolist()).index(fechaB_sug) if (fechaB_sug in B.columns) else 0)
         tolerancia = st.number_input("🎯 Tolerancia para diferencias de monto (valor absoluto)", min_value=0.0, value=0.0)
 
         if st.button("🔍 Ejecutar conciliación"):
@@ -284,10 +303,10 @@ if file_A and file_B:
             if fecha_B_opt != "(ninguna)": B["_FECHA_"] = coerce_date(B[fecha_B_opt])
 
             merged = A.merge(B, on="_CLAVE_", how="outer", suffixes=("_A","_B"), indicator=True)
+
             solo_A = merged[merged["_merge"]=="left_only"].copy()
             solo_B = merged[merged["_merge"]=="right_only"].copy()
-            coinc = merged[merged["_merge"]=="both"].copy()
-
+            coinc   = merged[merged["_merge"]=="both"].copy()
             coinc["_diff_monto_abs"] = (coinc["_MONTO__A"] - coinc["_MONTO__B"]).abs()
             diff_monto = coinc[coinc["_diff_monto_abs"] > tolerancia].copy()
 
@@ -299,24 +318,67 @@ if file_A and file_B:
             c1.metric("Solo en A", len(solo_A)); c2.metric("Solo en B", len(solo_B)); c3.metric("Dif. de monto", len(diff_monto))
 
             with st.expander("🟦 Solo en A"):
-                st.dataframe(solo_A); st.download_button("⬇️ Descargar Solo en A (CSV)", to_csv_bytes(solo_A), "solo_en_A.csv", "text/csv")
+                st.dataframe(solo_A)
+                st.download_button("⬇️ Descargar (XLSX)", to_xlsx_bytes(solo_A, "Solo_en_A"), "solo_en_a.xlsx",
+                                   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
             with st.expander("🟧 Solo en B"):
-                st.dataframe(solo_B); st.download_button("⬇️ Descargar Solo en B (CSV)", to_csv_bytes(solo_B), "solo_en_B.csv", "text/csv")
+                st.dataframe(solo_B)
+                st.download_button("⬇️ Descargar (XLSX)", to_xlsx_bytes(solo_B, "Solo_en_B"), "solo_en_b.xlsx",
+                                   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
             with st.expander("🟥 Coincidentes con diferencias de monto"):
                 st.dataframe(diff_monto[["_CLAVE_","_MONTO__A","_MONTO__B","_diff_monto_abs"]])
-                st.download_button("⬇️ Descargar Diferencias de Monto (CSV)", to_csv_bytes(diff_monto), "diferencias_monto.csv", "text/csv")
+                st.download_button("⬇️ Descargar (XLSX)", to_xlsx_bytes(diff_monto, "Diferencias_Monto"), "diferencias_monto.xlsx",
+                                   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
             if not diff_fecha.empty:
                 with st.expander("🟨 Coincidentes con diferencias de fecha"):
                     st.dataframe(diff_fecha)
-                    st.download_button("⬇️ Descargar Diferencias de Fecha (CSV)", to_csv_bytes(diff_fecha), "diferencias_fecha.csv", "text/csv")
+                    st.download_button("⬇️ Descargar (XLSX)", to_xlsx_bytes(diff_fecha, "Diferencias_Fecha"), "diferencias_fecha.xlsx",
+                                       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+            # Reporte DOCX con recomendaciones
+            recomendaciones = [
+                "Investigar registros presentes en un sistema pero ausentes en el otro (Solo en A / Solo en B).",
+                "Revisar integraciones/interfaz de datos y bitácoras de carga por fechas de corte.",
+                "Para diferencias de monto, verificar tipo de cambio, descuentos, impuestos y redondeos.",
+                "Validar que no existan asientos manuales fuera del proceso regular.",
+                "Acordar con Contabilidad/facturación un procedimiento de conciliación periódico.",
+                "Aplicar muestreo dirigido sobre discrepancias de mayor materialidad."
+            ]
+            resumen = [
+                f"Archivo A: {file_A.name} | Archivo B: {file_B.name}",
+                f"Solo en A: {len(solo_A)} | Solo en B: {len(solo_B)}",
+                f"Diferencias de monto: {len(diff_monto)} | Diferencias de fecha: {len(diff_fecha)}",
+                f"Tolerancia aplicada: {tolerancia:,.2f}",
+                f"Fecha de análisis: {datetime.now():%Y-%m-%d %H:%M}"
+            ]
+            doc_parrafos = ["RESUMEN:"] + [f"• {x}" for x in resumen] + ["", "RECOMENDACIONES:"] + [f"• {r}" for r in recomendaciones]
+            st.download_button("⬇️ Descargar reporte con recomendaciones (DOCX)",
+                               docx_bytes_from_text("Conciliación A vs. B – Reporte de Auditoría", doc_parrafos),
+                               "reporte_conciliacion.docx",
+                               "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+
     except Exception as e:
         st.error(f"❌ Error en conciliación: {e}")
 
 # ======================================================
-# 4) CAAT – Ley de Benford
+# 4) CAAT – Ley de Benford (con lista de “sospechosos” + alerta grande)
 # ======================================================
 section_intro("4️⃣", "Ley de Benford aplicada a transacciones",
-              "Contrasta el primer dígito de los montos con la distribución esperada por Benford y calcula χ² para evidenciar anomalías.")
+              "Contrasta el primer dígito de los montos con la distribución esperada por Benford, **lista transacciones sospechosas** y emite un **reporte**.")
+
+st.markdown("""
+<div class="section-card">
+<div class="big-warning">
+<strong>⚠️ Advertencia importante:</strong> La Ley de Benford es apropiada para conjuntos grandes de datos
+de naturaleza espontánea (no pre-condicionados), como ventas, gastos o pagos variados.
+No debe aplicarse a series acotadas, precios fijos, datos con mínimos/máximos impuestos, folios,
+o montos predefinidos; en esos casos, los resultados pueden ser engañosos.
+</div>
+</div>
+""", unsafe_allow_html=True)
 
 file_benford = st.file_uploader("📁 Subir archivo (CSV/XLSX/XLS/TXT)", type=["csv","xlsx","xls","txt"], key="benford")
 
@@ -355,10 +417,17 @@ if file_benford:
         col_monto_b = st.selectbox("💰 Columna de monto", candidatas, index=(candidatas.index(sugerida_monto_b) if sugerida_monto_b in candidatas else 0))
         min_val = st.number_input("🔻 Ignorar montos menores a (opcional)", min_value=0.0, value=0.0)
         min_count_alert = st.number_input("🔔 Mínimo sugerido de observaciones", min_value=0, value=100)
+        desvio_min = st.number_input("🎚 Umbral de desviación por dígito (puntos porcentuales)", min_value=0.0, value=2.0, step=0.5,
+                                     help="Se marcarán como 'sospechosos' los dígitos cuya proporción Observada - Esperada ≥ este umbral.")
 
         if st.button("🔍 Ejecutar Benford"):
             serie = dfb[col_monto_b]; 
-            if serie.dtype == object: serie = coerce_amount(serie)
+            if serie.dtype == object:
+                conv = coerce_amount(serie)
+                if conv.notna().mean() < 0.30:
+                    st.error("La columna seleccionada no tiene suficientes valores convertibles a número (≥30%).")
+                    st.stop()
+                serie = conv
             base = pd.to_numeric(serie, errors="coerce").dropna()
             if min_val > 0: base = base[base.abs() >= min_val]
 
@@ -367,8 +436,9 @@ if file_benford:
                 st.error("❌ No hay suficientes datos numéricos válidos tras la limpieza/filtros.")
             else:
                 obs_counts = fd.value_counts().reindex(range(1,10), fill_value=0).sort_index()
-                obs_prop = obs_counts / n
-                exp_prop = benford_expected(); exp_counts = (exp_prop * n)
+                obs_prop   = obs_counts / n
+                exp_prop   = benford_expected()
+                exp_counts = (exp_prop * n)
                 chi2 = (((obs_counts - exp_counts) ** 2) / exp_counts.replace(0, np.nan)).sum()
                 chi2_crit = 15.507  # α=0.05, gl=8
                 cumple = chi2 <= chi2_crit
@@ -378,119 +448,48 @@ if file_benford:
                 c1.metric("Observaciones válidas", n); c2.metric("Chi-cuadrado", f"{chi2:,.3f}"); c3.metric("¿Cumple (α=0.05)?", "Sí ✅" if cumple else "No ⚠️")
                 if n < min_count_alert: st.info(f"ℹ️ Nota: {n} observaciones; sugerido ≥ {min_count_alert} para mayor robustez.")
 
+                # Tabla observados vs esperados
                 tabla = pd.DataFrame({
                     "Dígito": list(range(1,10)),
                     "Frecuencia Observada": obs_counts.values,
-                    "Proporción Observada": (obs_prop.values * 100).round(2),
-                    "Proporción Esperada (Benford %)": (exp_prop.values * 100).round(2),
-                    "Conteo Esperado": exp_counts.round(2).values
+                    "Proporción Observada (%)": (obs_prop.values * 100).round(2),
+                    "Proporción Esperada (%)": (exp_prop.values * 100).round(2),
+                    "Desviación (pp)": ((obs_prop - exp_prop).values * 100).round(2)
                 })
                 st.dataframe(tabla)
 
+                # Gráfico barras
                 fig, ax = plt.subplots()
                 idx = np.arange(1, 10)
                 ax.bar(idx - 0.15, obs_prop.values, width=0.3, label="Observado")
                 ax.bar(idx + 0.15, exp_prop.values, width=0.3, label="Esperado (Benford)")
-                ax.set_xticks(idx); ax.set_xlabel("Primer dígito"); ax.set_ylabel("Proporción"); ax.set_title("Ley de Benford: Observado vs. Esperado"); ax.legend()
+                ax.set_xticks(idx); ax.set_xlabel("Primer dígito"); ax.set_ylabel("Proporción")
+                ax.set_title("Ley de Benford: Observado vs. Esperado"); ax.legend()
                 st.pyplot(fig)
 
-                st.download_button("⬇️ Descargar tabla Benford (CSV)", to_csv_bytes(tabla), "benford_resultados.csv", "text/csv")
+                # Dígitos sospechosos y transacciones asociadas
+                sospechosos = tabla.loc[tabla["Desviación (pp)"] >= desvio_min, "Dígito"].tolist()
+                st.write(f"**Dígitos marcados como 'sospechosos' (desviación ≥ {desvio_min:.1f} pp):** {sospechosos if sospechosos else 'Ninguno'}")
+
+                df_base = pd.DataFrame({"_monto_": base})
+                df_base["_1er_dig"] = first_digit_series(base.values)
+                sospechosas = df_base[df_base["_1er_dig"].isin(sospechosos)].copy()
+
+                with st.expander("🔎 Ver transacciones sospechosas por dígito"):
+                    if not sospechosas.empty:
+                        st.dataframe(sospechosas.head(1000))  # muestra razonable
+                        st.download_button("⬇️ Descargar sospechosas (XLSX)",
+                                           to_xlsx_bytes(sospechosas, "Sospechosas_Benford"),
+                                           "benford_sospechosas.xlsx",
+                                           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                    else:
+                        st.info("No se encontraron transacciones sospechosas con el umbral seleccionado.")
+
+                # Descarga XLSX del resumen
+                st.download_button("⬇️ Descargar tabla resumen (XLSX)",
+                                   to_xlsx_bytes(tabla, "Resumen_Benford"),
+                                   "benford_resumen.xlsx",
+                                   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
     except Exception as e:
         st.error(f"❌ Error en Benford: {e}")
-
-# ======================================================
-# 5) CAAT – Concentración de Clientes/Proveedores
-# ======================================================
-section_intro("5️⃣", "Análisis de Concentración de Clientes o Proveedores",
-              "Mide participación y acumulado por entidad, calcula HHI y muestra Top N y Curva de Lorenz para detectar dependencias.")
-
-file_conc = st.file_uploader("📁 Subir archivo de ventas o compras (CSV/XLSX/XLS/TXT)", type=["csv","xlsx","xls","txt"], key="conc_file")
-
-if file_conc:
-    try:
-        dfc = load_any(file_conc, widget_key="sheet_conc"); dfc = normalize_headers(dfc)
-        st.success(f"✅ Archivo cargado. Filas: {len(dfc)}")
-        with st.expander("Ver primeras filas"): st.dataframe(dfc.head())
-
-        entidad_col = st.selectbox("🏷️ Columna de entidad (Cliente/Proveedor)", dfc.columns.tolist())
-        numeric_cols = dfc.select_dtypes(include='number').columns.tolist()
-        col_monto_default = numeric_cols[0] if numeric_cols else dfc.columns[0]
-        monto_col = st.selectbox("💰 Columna de monto", dfc.columns.tolist(), index=(dfc.columns.tolist().index(col_monto_default) if col_monto_default in dfc.columns else 0))
-
-        sentido = st.radio("Tipo de análisis", ["Clientes (ventas)", "Proveedores (compras)"], horizontal=True)
-        umbral_flag = st.number_input("🎯 Umbral de participación para marcar (ej. 40%)", min_value=0.0, max_value=100.0, value=40.0)
-        top_n = st.slider("👑 Mostrar Top N en gráfico de barras", min_value=3, max_value=20, value=10)
-
-        if st.button("🔍 Calcular concentración"):
-            serie_monto = dfc[monto_col]
-            if serie_monto.dtype == object: serie_monto = coerce_amount(serie_monto)
-            dfc["_MONTO_"] = pd.to_numeric(serie_monto, errors="coerce")
-
-            base = dfc.dropna(subset=[entidad_col, "_MONTO_"]).copy()
-            base[entidad_col] = base[entidad_col].astype(str).str.strip()
-
-            ag = (base.groupby(entidad_col, dropna=True)
-                        .agg(Total=("_MONTO_", "sum"),
-                             Transacciones=("_MONTO_", "count"))
-                        .reset_index()) \
-                        .sort_values("Total", ascending=False)
-
-            total_general = ag["Total"].sum()
-            ag["Participacion_%"] = (ag["Total"] / total_general * 100).round(2)
-            ag["Acumulado_%"] = ag["Participacion_%"].cumsum().round(2)
-
-            def cum_share(k):
-                return ag["Participacion_%"].iloc[:k].sum() if len(ag) >= k else ag["Participacion_%"].sum()
-            top1, top3, top5, top10 = cum_share(1), cum_share(3), cum_share(5), cum_share(10)
-
-            shares = ag["Participacion_%"] / 100.0
-            hhi = int((shares.pow(2).sum() * 10000).round(0))
-
-            st.subheader("📊 Indicadores de concentración")
-            c1, c2, c3, c4, c5 = st.columns(5)
-            c1.metric("Top 1", f"{top1:.2f}%"); c2.metric("Top 3", f"{top3:.2f}%")
-            c3.metric("Top 5", f"{top5:.2f}%"); c4.metric("Top 10", f"{top10:.2f}%"); c5.metric("HHI", f"{hhi}")
-
-            # --- marcados por umbral de participación ---
-            mostrar_solo_umbral = st.checkbox("🔎 Mostrar solo entidades con participación ≥ umbral", value=False)
-            marcados = ag[ag["Participacion_%"] >= umbral_flag]
-            tabla_mostrar = marcados.copy() if mostrar_solo_umbral else ag.copy()
-
-            st.subheader("📄 Tabla de concentración por entidad"); st.dataframe(tabla_mostrar)
-            if mostrar_solo_umbral:
-                if marcados.empty:
-                    st.info(f"No hay entidades con participación ≥ {umbral_flag:.0f}%. Prueba con un umbral menor (ej. 1% o 0.5%).")
-                else:
-                    st.success(f"{len(marcados)} entidades con participación ≥ {umbral_flag:.0f}%")
-                    st.download_button("⬇️ Descargar marcados (CSV)", to_csv_bytes(marcados), "entidades_marcadas_umbral.csv", "text/csv")
-            else:
-                st.download_button("⬇️ Descargar tabla completa (CSV)", to_csv_bytes(ag), "concentracion_entidades.csv", "text/csv")
-
-            # --- Pareto por acumulado ---
-            umbral_acum = st.number_input("📈 Umbral de acumulado para Pareto (ej. 80%)", min_value=1.0, max_value=100.0, value=80.0, step=1.0)
-            idx_pareto = (ag["Acumulado_%"] >= umbral_acum).idxmax() if not ag.empty else None
-            if idx_pareto is not None and not np.isnan(idx_pareto):
-                n_pareto = ag.index.get_loc(idx_pareto) + 1
-                st.metric(f"Nº mínimo de entidades para llegar al {umbral_acum:.0f}%", n_pareto)
-                st.download_button(f"⬇️ Descargar TOP {n_pareto} (CSV)", to_csv_bytes(ag.head(n_pareto)), f"top_{n_pareto}_hasta_{int(umbral_acum)}pct.csv", "text/csv")
-
-            # Gráfico 1: Top N barras
-            fig1, ax1 = plt.subplots()
-            top_plot = ag.head(top_n)
-            ax1.bar(top_plot[entidad_col].astype(str), top_plot["Participacion_%"])
-            ax1.set_title(f"Top {top_n} participación (%) – {sentido}")
-            ax1.set_ylabel("Participación (%)")
-            ax1.set_xticklabels(top_plot[entidad_col].astype(str), rotation=45, ha="right")
-            st.pyplot(fig1)
-
-            # Gráfico 2: Curva de Lorenz
-            shares_sorted = np.sort(shares.values)
-            lorenz = np.cumsum(shares_sorted); lorenz = np.insert(lorenz, 0, 0)
-            x = np.linspace(0.0, 1.0, len(lorenz))
-            fig2, ax2 = plt.subplots()
-            ax2.plot(x, lorenz, label="Curva de Lorenz"); ax2.plot([0,1], [0,1], linestyle="--", label="Igualdad perfecta")
-            ax2.set_title(f"Curva de Lorenz – {sentido}"); ax2.set_xlabel("Proporción de entidades"); ax2.set_ylabel("Proporción acumulada de monto"); ax2.legend()
-            st.pyplot(fig2)
-
-    except Exception as e:
-        st.error(f"❌ Error en análisis de concentración: {e}")
