@@ -8,7 +8,6 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from docx import Document
 from docx.shared import Pt
-from datetime import datetime
 
 # ------------------- Apariencia global -------------------
 st.set_page_config(page_title="CAAT – Auditoría Automatizada", layout="wide")
@@ -125,7 +124,27 @@ def docx_from_sections(title: str, sections: list[tuple[str, list[str]]]) -> byt
 
 # ============================ MÓDULO 1: Montos Inusuales ============================
 def ui_montos_inusuales():
-    st.markdown('<div class="section-card"><div class="section-title">2️⃣ Detección de Montos Inusuales</div><div class="section-desc">Encuentra transacciones que superan un umbral (fijo o estadístico) y descarga hallazgos (XLSX) + reporte detallado (DOCX).</div></div>', unsafe_allow_html=True)
+    st.markdown("""
+<div class="section-card">
+  <div class="section-title">2️⃣ Detección de Montos Inusuales</div>
+  <div class="section-desc">
+    Identifica transacciones que se apartan de los patrones normales por <strong>umbral fijo</strong> o por
+    <strong>análisis estadístico (media + k·σ)</strong>. Ayuda a detectar <em>errores de registro</em>, 
+    <em>pagos extraordinarios</em> y posibles <em>fraudes</em>.
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+    with st.expander("🧭 ¿Qué puede descubrir esta prueba?", expanded=True):
+        st.markdown("""
+- **Pagos/egresos atípicos** por monto o z-score elevado.  
+- **Sobrefacturación** o **errores de digitación** (ceros extra, separadores).  
+- **Operaciones fuera de política** que requieren justificación o aprobación adicional.  
+
+**Entregables:**  
+- **XLSX**: Hallazgos, Resumen Estadístico, Top por monto, Top por z-score (y agrupación por ID si la seleccionas).  
+- **DOCX**: Resumen, análisis y **recomendaciones accionables** para el auditor.
+""")
 
     file_unusual = st.file_uploader("📁 Subir archivo (CSV/XLSX/XLS/TXT)", type=["csv","xlsx","xls","txt"], key="unusual")
     if not file_unusual: return
@@ -226,7 +245,7 @@ def ui_montos_inusuales():
     sections = [("RESUMEN", [f"• {x}" for x in bullets_resumen]),
                 ("DETALLE PRINCIPAL", [f"• {x}" for x in detalle] if detalle else ["• Sin detalles adicionales."]),
                 ("RECOMENDACIONES", [f"• {x}" for x in recomendaciones]),
-                ("REFERENCIA XLSX", ["• 'montos_inusuales.xlsx' (Hoja Hallazgos, ResumenEstadistico, TopPorMonto, TopPorZscore, GrupoPorID si aplica)."])]
+                ("REFERENCIA XLSX", ["• 'montos_inusuales.xlsx' (Hallazgos, ResumenEstadistico, TopPorMonto, TopPorZscore, GrupoPorID si aplica)."])]
     st.download_button("⬇️ Descargar reporte (DOCX)",
                        docx_from_sections("Montos Inusuales – Reporte de Auditoría", sections),
                        "reporte_montos_inusuales.docx",
@@ -234,7 +253,27 @@ def ui_montos_inusuales():
 
 # ============================ MÓDULO 2: Conciliación ============================
 def ui_conciliacion():
-    st.markdown('<div class="section-card"><div class="section-title">3️⃣ Conciliación de Reportes (A vs. B)</div><div class="section-desc">Compara dos fuentes (p. ej., Facturación vs. Contabilidad). Descarga un XLSX con hallazgos y un reporte DOCX detallado.</div></div>', unsafe_allow_html=True)
+    st.markdown("""
+<div class="section-card">
+  <div class="section-title">3️⃣ Conciliación de Reportes (A vs. B)</div>
+  <div class="section-desc">
+    Compara dos fuentes (p. ej., <strong>Facturación</strong> vs. <strong>Contabilidad</strong>) y detecta 
+    <strong>faltantes</strong>, <strong>registros inesperados</strong> y <strong>diferencias de monto/fecha</strong>.
+    Útil para validar integridad y consistencia de datos entre sistemas.
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+    with st.expander("🧭 ¿Qué puede descubrir esta prueba?", expanded=True):
+        st.markdown("""
+- **Transacciones en A que no están en B** (o viceversa).  
+- **Diferencias de importe** por tipo de cambio, descuentos, impuestos o asientos manuales.  
+- **Desalineaciones de fecha** (corte/cierre, reprocesos, integraciones).  
+
+**Entregables:**  
+- **XLSX**: Resumen, Solo en A, Solo en B, Diferencias de Monto, Diferencias de Fecha.  
+- **DOCX**: Impacto, top diferencias y **recomendaciones** (controles, conciliaciones automáticas, tolerancias).
+""")
 
     colA, colB = st.columns(2)
     with colA: file_A = st.file_uploader("📁 Archivo A", type=["csv","xlsx","xls","txt"], key="conc_a")
@@ -352,11 +391,32 @@ def benford_expected() -> pd.Series:
     d = np.arange(1, 10); return pd.Series(np.log10(1 + 1/d), index=d)
 
 def ui_benford():
-    st.markdown('<div class="section-card"><div class="section-title">4️⃣ Ley de Benford aplicada a transacciones</div><div class="section-desc">Contrasta el primer dígito con Benford, lista transacciones sospechosas y permite descargar XLSX/DOCX.</div></div>', unsafe_allow_html=True)
+    st.markdown("""
+<div class="section-card">
+  <div class="section-title">4️⃣ Ley de Benford aplicada a transacciones</div>
+  <div class="section-desc">
+    Analiza la distribución del <strong>primer dígito</strong> de los montos y la compara con la 
+    <strong>distribución esperada de Benford</strong>. Útil en <em>auditoría forense</em> para detectar 
+    <em>manipulación</em> o <em>patrones artificiales</em>.
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+    with st.expander("🧭 ¿Qué puede descubrir esta prueba?", expanded=True):
+        st.markdown("""
+- **Desviaciones significativas por dígito** que sugieren ajuste o generación artificial.  
+- **Series alteradas** (precios fijos, redondeos sistemáticos, topes/mínimos).  
+- **Focos de riesgo** por proveedor/cliente/centro al segmentar el análisis.  
+
+**Entregables:**  
+- **XLSX**: Resumen por dígito y, si aplica, **transacciones sospechosas** (dígitos desviados).  
+- **DOCX**: Cumplimiento/No cumplimiento, desviaciones por dígito y **recomendaciones forenses**.
+""")
 
     st.markdown("""
 <div class="section-card"><div class="big-warning">
-<strong>⚠️ Advertencia:</strong> Benford es válido para conjuntos grandes <em>no pre-condicionados</em>. Evitar precios fijos, topes/mínimos, folios o montos prefijados.
+<strong>⚠️ Advertencia importante:</strong> Benford es adecuado para conjuntos grandes de datos de naturaleza espontánea
+(no pre-condicionados). Evitar series acotadas, precios fijos, mínimos/máximos, folios o montos prefijados.
 </div></div>
 """, unsafe_allow_html=True)
 
